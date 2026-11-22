@@ -1,4 +1,5 @@
 #include "assetanalysis.h"
+#include "tilemap.h"
 
 #include <QImage>
 #include <QJsonArray>
@@ -172,6 +173,63 @@ private slots:
         const auto q = analyseAssets(manifestIn(d.path(), R"({"quantize": 32, "bg1": {"image": "rgb.png"}})"));
         QVERIFY(q.entries[0].ok());
         QVERIFY(q.budgets[0].estimate);
+    }
+
+    void aTilemapIsCostedLikeThePictureItCameFrom()
+    {
+        QTemporaryDir d;
+        indexedPng(d.path() + "/ground.png", 32, 16, 4);
+        const auto fromImage = analyseAssets(manifestIn(d.path(), R"({"bg0": {"image": "ground.png"}})"));
+
+        QString err;
+        TileMap m = TileMap::createFromImage(d.path() + "/ground.tmj", "ground.png", {32, 16}, "bg", &err);
+        QVERIFY2(m.save(&err), qPrintable(err));
+        const auto fromMap = analyseAssets(manifestIn(d.path(), R"({"bg0": {"tiled": "ground.tmj", "layer": "bg"}})"));
+
+        QVERIFY2(fromMap.ok(), qPrintable(fromMap.entries[0].errors.join(' ')));
+        QVERIFY(fromMap.entries[0].analysed);
+        QCOMPARE(fromMap.entries[0].width, 32);
+        QCOMPARE(fromMap.entries[0].colours, fromImage.entries[0].colours);
+        QCOMPARE(fromMap.entries[0].tiles, fromImage.entries[0].tiles);
+        for (int i = 0; i < fromImage.budgets.size(); ++i)
+            QCOMPARE(fromMap.budgets[i].used, fromImage.budgets[i].used);
+    }
+
+    void aTilemapCostsOnlyTheTilesItUses()
+    {
+        QTemporaryDir d;
+        indexedPng(d.path() + "/sheet.png", 32, 16, 8);                  // 8 distinct tiles
+        QString err;
+        TileMap m = TileMap::createEmpty(d.path() + "/m.tmj", "sheet.png", {32, 16}, 4, 4, "bg");
+        m.setCell(0, 0, 0, 1);
+        m.setCell(0, 1, 0, 2);
+        m.setCell(0, 2, 0, 2 | kFlipH);                                  // a flipped copy is not a new tile here
+        QVERIFY(m.save(&err));
+        const auto r = analyseAssets(manifestIn(d.path(), R"({"bg1": {"tiled": "m.tmj", "layer": "bg"}})"));
+        QVERIFY2(r.ok(), qPrintable(r.entries[0].errors.join(' ')));
+        QCOMPARE(r.entries[0].tiles, 3);                                 // tile 1, tile 2 and the blank one for empty cells
+        QCOMPARE(r.budgets[3].label, QStringLiteral("Tiles: background 1"));
+        QCOMPARE(r.budgets[3].used, 3);
+        QCOMPARE(r.budgets[1].used, 0);
+    }
+
+    void aTilemapProblemsAreReportedBeforeABuild()
+    {
+        QTemporaryDir d;
+        indexedPng(d.path() + "/sheet.png", 32, 16, 8);
+        QString err;
+        TileMap m = TileMap::createEmpty(d.path() + "/m.tmj", "sheet.png", {32, 16}, 4, 4, "bg");
+        m.setCell(0, 0, 0, 2 | kFlipD);
+        QVERIFY(m.save(&err));
+        const auto rotated = analyseAssets(manifestIn(d.path(), R"({"bg0": {"tiled": "m.tmj", "layer": "bg"}})"));
+        QVERIFY(!rotated.ok());
+        QVERIFY(rotated.entries[0].errors.join(' ').contains("rotated"));
+
+        const auto wrongLayer = analyseAssets(manifestIn(d.path(), R"({"bg0": {"tiled": "m.tmj", "layer": "nope"}})"));
+        QVERIFY(wrongLayer.entries[0].errors.join(' ').contains("nope"));
+
+        const auto missing = analyseAssets(manifestIn(d.path(), R"({"bg0": {"tiled": "gone.tmj"}})"));
+        QVERIFY(!missing.ok());
     }
 
     void reductionCapsWhatAnRgbImageCosts()

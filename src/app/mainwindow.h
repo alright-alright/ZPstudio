@@ -50,7 +50,8 @@ private:
     QStringList recentProjects() const;
 
     // ---- editing ----
-    CodeEditor* openFile(const QString& path);
+    QWidget* openFile(const QString& path);          // a source file or a .tmj map, in a tab
+    void setTabDirty(QWidget* tab, bool dirty);
     void openFileAt(const QString& file, int line);
     bool saveAll();
     bool saveAllOrAsk();

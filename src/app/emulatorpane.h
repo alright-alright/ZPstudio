@@ -30,7 +30,8 @@ public:
     void stopGame();
     bool running() const;
 
-    // The widget the game is drawn in (null without the emulator): what a test grabs to see the picture.
+    // The widget the game is drawn in: what a test grabs to see the picture. Null without the emulator, and until
+    // the first game is played (it is created then).
     QWidget* screen() const;
 
 signals:
@@ -41,10 +42,14 @@ protected:
 
 private:
     void updateControls();
+#ifdef ZPSTUDIO_HAVE_EMULATOR
+    void ensureEmulator();
+#endif
     void showFocus(bool game);
     void showSpeed(int fps);
 
     QStackedLayout* stack_ = nullptr;
+    QWidget* host_ = nullptr;                  // the area the game widget lives in
     QLabel* idle_ = nullptr;
     QLabel* focus_ = nullptr;
     QLabel* speed_ = nullptr;

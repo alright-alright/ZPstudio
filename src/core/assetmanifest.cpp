@@ -134,6 +134,16 @@ void AssetManifest::setBackground(AssetEntry::Role bg, const QString& imageRel)
     json_[key] = o;
 }
 
+void AssetManifest::setTiledBackground(AssetEntry::Role bg, const QString& tiledRel, const QString& layerName)
+{
+    const QString key = bg == AssetEntry::Role::Background1 ? QStringLiteral("bg1") : QStringLiteral("bg0");
+    QJsonObject o = json_.value(key).toObject();
+    o.remove(QStringLiteral("image"));
+    o[QStringLiteral("tiled")] = tiledRel;
+    o[QStringLiteral("layer")] = layerName;
+    json_[key] = o;
+}
+
 void AssetManifest::addSprite(const QString& name, const QString& imageRel, int frameW, int frameH)
 {
     QJsonArray a = json_.value(QStringLiteral("sprites")).toArray();

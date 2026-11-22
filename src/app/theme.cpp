@@ -36,6 +36,7 @@ void apply(QApplication& app)
         "QToolBar { border: 0; spacing: 4px; padding: 4px; background: #1a1b3a; }"
         "QToolButton { padding: 5px 10px; border-radius: 5px; }"
         "QToolButton:hover { background: #2b2c5c; }"
+        "QToolButton:checked { background: #3a3b78; border-bottom: 2px solid %1; }"
         "QToolButton:disabled { color: #6b6e92; }"
         "QDockWidget::title { background: #1a1b3a; padding: 6px; }"
         "QTabBar::tab { padding: 6px 12px; background: #14152e; border: 0; }"

@@ -27,6 +27,7 @@ public:
 
 signals:
     void manifestChanged();                  // assets.json was rewritten
+    void openMapRequested(const QString& path);   // open this .tmj in the map editor
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -34,6 +35,8 @@ protected:
 
 private:
     void chooseAndAdd();
+    void editSelectedAsTilemap();
+    void newTilemap();
     void removeSelected();
     void setQuantize(bool on);
     bool saveManifest();

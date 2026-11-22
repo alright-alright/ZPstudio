@@ -103,6 +103,10 @@ add_library(zpstudio_core STATIC
     src/core/projectconfig.cpp
     src/core/diagnostics.cpp
     src/core/linemap.cpp
+    src/core/tilemap.cpp
+    src/core/tilemapedit.cpp
+    src/core/tilemapdoc.cpp
+    src/core/tileatlas.cpp
     src/core/buildplan.cpp
     src/core/buildrunner.cpp
     src/core/assetmanifest.cpp
@@ -137,9 +141,10 @@ target_link_libraries(zpstudio PRIVATE zpstudio_app)
 
 # ---- tests ----
 enable_testing()
-foreach(t diagnostics linemap buildplan assets project)
+foreach(t diagnostics linemap buildplan assets project tilemap)
     add_executable(tst_${t} tests/tst_${t}.cpp)
     target_link_libraries(tst_${t} PRIVATE zpstudio_core Qt6::Test)
+    target_compile_definitions(tst_${t} PRIVATE ZPSTUDIO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME ${t} COMMAND tst_${t})
     set_tests_properties(${t} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endforeach()
@@ -149,4 +154,4 @@ add_executable(tst_gui tests/tst_gui.cpp)
 target_link_libraries(tst_gui PRIVATE zpstudio_app Qt6::Test)
 target_compile_definitions(tst_gui PRIVATE ZPSTUDIO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME gui COMMAND tst_gui)
-set_tests_properties(gui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(gui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;SDL_AUDIODRIVER=dummy")

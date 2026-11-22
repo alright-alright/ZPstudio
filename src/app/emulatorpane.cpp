@@ -64,21 +64,16 @@ EmulatorPane::EmulatorPane(QWidget* parent) : QWidget(parent)
     volume_->setValue(s.value(QStringLiteral("game/volume"), 80).toInt());
     mute_->setChecked(s.value(QStringLiteral("game/mute"), false).toBool());
 
+    host_ = screen;
 #ifdef ZPSTUDIO_HAVE_EMULATOR
-    emu_ = new EmulatorWidget(screen);
-    emu_->installEventFilter(this);               // to tell the user where the keyboard is
-    stack_->addWidget(emu_);
-    emu_->setAudioVolume(volume_->value());
-    emu_->setAudioEnabled(!mute_->isChecked());
-    connect(restart_, &QToolButton::clicked, emu_, &EmulatorWidget::reset);
-    connect(powerCycle_, &QToolButton::clicked, emu_, &EmulatorWidget::hardReset);
-    connect(emu_, &EmulatorWidget::fpsChanged, this, &EmulatorPane::showSpeed);
+    // The emulator widget (and the audio device it opens) is only made on the first Run: opening the sound card can
+    // stall, and that must never be able to hold up the window appearing.
     connect(volume_, &QSlider::valueChanged, this, [this](int v) {
-        emu_->setAudioVolume(v);
+        if (emu_) emu_->setAudioVolume(v);
         QSettings().setValue(QStringLiteral("game/volume"), v);
     });
     connect(mute_, &QToolButton::toggled, this, [this](bool m) {
-        emu_->setAudioEnabled(!m);
+        if (emu_) emu_->setAudioEnabled(!m);
         QSettings().setValue(QStringLiteral("game/mute"), m);
     });
 #endif
@@ -114,9 +109,25 @@ QWidget* EmulatorPane::screen() const
 #endif
 }
 
+#ifdef ZPSTUDIO_HAVE_EMULATOR
+void EmulatorPane::ensureEmulator()
+{
+    if (emu_) return;
+    emu_ = new EmulatorWidget(host_);
+    emu_->installEventFilter(this);               // to tell the user where the keyboard is
+    stack_->addWidget(emu_);
+    emu_->setAudioVolume(volume_->value());
+    emu_->setAudioEnabled(!mute_->isChecked());
+    connect(restart_, &QToolButton::clicked, emu_, &EmulatorWidget::reset);
+    connect(powerCycle_, &QToolButton::clicked, emu_, &EmulatorWidget::hardReset);
+    connect(emu_, &EmulatorWidget::fpsChanged, this, &EmulatorPane::showSpeed);
+}
+#endif
+
 bool EmulatorPane::play(const zps::Toolchain& tc, const QString& romPath, QString* error)
 {
 #ifdef ZPSTUDIO_HAVE_EMULATOR
+    ensureEmulator();
     // Boot ROM / APU BIOS apply on the next load; empty means the emulator's built-in boot.
     emu_->setBootROMPath(tc.bootRom);
     emu_->setApuBiosPath(tc.apuBios);

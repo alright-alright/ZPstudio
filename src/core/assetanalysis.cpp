@@ -1,5 +1,7 @@
 #include "assetanalysis.h"
 
+#include "tileatlas.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
@@ -76,6 +78,87 @@ ImageData scan(const QImage& img, const QString& transparent)
     return d;
 }
 
+// What a tilemap-backed background costs: the distinct tiles its layer uses and the colours of the sheets it draws
+// from (png2zp adds a whole sheet's palette once any tile of it is used).
+struct TiledScan {
+    bool ok = false;
+    QStringList errors;
+    int width = 0, height = 0;                 // in cells
+    QSet<QByteArray> tiles;
+    QSet<quint16> colours;                     // every colour of the sheets in use
+    QSet<quint16> indexedColours;              // the part of that from sheets that keep their own palette
+    int quantizedSheetColours = 0, quantizedSheets = 0;   // sheets that will be reduced instead
+    bool indexedAll = true;
+};
+
+QByteArray tileKey(const QImage& tile)
+{
+    QByteArray block;
+    for (int y = 0; y < tile.height(); ++y)
+        for (int x = 0; x < tile.width(); ++x) {
+            const QRgb p = tile.pixel(x, y);
+            const quint16 c = qAlpha(p) == 0 ? quint16(0xFFFF) : rgb555(p);
+            block.append(char(c & 0xFF));
+            block.append(char(c >> 8));
+        }
+    return block;
+}
+
+TiledScan scanTiled(const QString& path, const QString& layerName, const QString& transparent)
+{
+    TiledScan out;
+    TileMap map;
+    QString err;
+    if (!TileMap::load(path, &map, &err)) { out.errors << err; return out; }
+    const int li = layerName.isEmpty() ? (map.layers().isEmpty() ? -1 : 0) : map.layerIndex(layerName);
+    if (li < 0) {
+        out.errors << (layerName.isEmpty() ? QStringLiteral("The map has no tile layer.")
+                                           : QStringLiteral("The map has no tile layer named \"%1\".").arg(layerName));
+        return out;
+    }
+    out.errors << map.problems();
+    out.width = map.width();
+    out.height = map.height();
+
+    const TileAtlas atlas(map);
+    QSet<int> sheetsUsed;
+    QSet<QByteArray> missingSheets;
+    for (quint32 gid : map.layers()[li].data) {
+        if (!(gid & kGidMask)) {                         // an empty cell becomes the blank tile
+            out.tiles.insert(QByteArray(kTileSize * kTileSize * 2, char(0xFF)));
+            continue;
+        }
+        int ts = -1;
+        for (int i = 0; i < map.tilesets().size(); ++i)
+            if (map.tilesets()[i].contains(gid & kGidMask)) { ts = i; break; }
+        if (ts < 0) continue;                            // reported by problems()
+        if (!atlas.sheetOk(ts)) {
+            if (!missingSheets.contains(map.tilesets()[ts].image.toUtf8())) {
+                missingSheets.insert(map.tilesets()[ts].image.toUtf8());
+                out.errors << QStringLiteral("Cannot read the tile sheet %1.").arg(map.tilesets()[ts].image);
+            }
+            continue;
+        }
+        sheetsUsed.insert(ts);
+        const QImage tile = atlas.tile(gid & kGidMask);   // flips do not make a new tile unless "flips" folding is off
+        if (tile.isNull()) {
+            out.errors << QStringLiteral("A tile lies outside its sheet %1.").arg(map.tilesets()[ts].image);
+            break;
+        }
+        out.tiles.insert(tileKey(tile));
+    }
+    for (int ts : sheetsUsed) {
+        const QImage& sheet = atlas.sheet(ts);
+        const ImageData d = scan(sheet, transparent);
+        const bool indexed = QImage(QDir(map.dir()).filePath(map.tilesets()[ts].image)).format() == QImage::Format_Indexed8;
+        out.colours.unite(d.colours);
+        if (indexed) out.indexedColours.unite(d.colours);
+        else { out.indexedAll = false; out.quantizedSheetColours += int(d.colours.size()); ++out.quantizedSheets; }
+    }
+    out.ok = true;
+    return out;
+}
+
 } // namespace
 
 AssetReport analyseAssets(const AssetManifest& manifest)
@@ -96,7 +179,25 @@ AssetReport analyseAssets(const AssetManifest& manifest)
         if (e.role == AssetEntry::Role::TextBox) { report.entries << r; continue; }
         if (e.image.isEmpty()) {
             if (!e.tiled.isEmpty()) {
-                r.notes << QStringLiteral("Tiled map: not analysed here, png2zp checks it at build time.");
+                const bool bg1 = e.role == AssetEntry::Role::Background1;
+                const QJsonObject spec = manifest.json().value(QString::fromLatin1(bg1 ? "bg1" : "bg0")).toObject();
+                const TiledScan t = scanTiled(dir.filePath(e.tiled), spec.value(QStringLiteral("layer")).toString(),
+                                              spec.value(QStringLiteral("transparent")).toString());
+                r.errors << t.errors;
+                if (t.ok) {
+                    r.analysed = true;
+                    r.width = t.width * kTileSize;
+                    r.height = t.height * kTileSize;
+                    r.tiles = int(t.tiles.size());
+                    r.colours = int(t.colours.size());
+                    indexedColours.unite(t.indexedColours);
+                    quantizedColours += quantize > 0 ? qMin(t.quantizedSheetColours, quantize * t.quantizedSheets) : 0;
+                    bankTiles[bg1 ? 2 : 0].unite(t.tiles);
+                    if (r.colours > kMaxColours)
+                        r.errors << QStringLiteral("%1 colours in the tile sheets; the whole game has %2.").arg(r.colours).arg(kMaxColours);
+                    if (!t.indexedAll && quantize == 0)
+                        r.errors << QStringLiteral("A tile sheet is not an indexed (palette) PNG. Convert it, or turn on automatic colour reduction.");
+                }
             } else {
                 r.errors << QStringLiteral("No image set.");
             }

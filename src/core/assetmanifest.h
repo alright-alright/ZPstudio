@@ -38,6 +38,8 @@ public:
 
     // Edits (in memory; call save()). Backgrounds/font/frame hold one asset each: setting replaces it.
     void setBackground(AssetEntry::Role bg, const QString& imageRel);
+    // Makes a background come from a Tiled map's layer instead of a picture; keeps flips/fill/transparent.
+    void setTiledBackground(AssetEntry::Role bg, const QString& tiledRel, const QString& layerName);
     void addSprite(const QString& name, const QString& imageRel, int frameW = 0, int frameH = 0);
     void setFont(const QString& imageRel);
     void setFrame(const QString& imageRel);

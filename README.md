@@ -4,9 +4,11 @@
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599c?logo=cplusplus&logoColor=white)
 ![CMake](https://img.shields.io/badge/CMake-3.16%2B-064f8c?logo=cmake&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-8b5cf6)
-![Status](https://img.shields.io/badge/status-milestone%202-e0579b)
+![Status](https://img.shields.io/badge/status-milestone%203-e0579b)
 
 ![ZeroPoint Studio](docs/screenshot.png)
+
+![The tilemap editor](docs/tilemap-editor.png)
 
 ## Description
 
@@ -23,7 +25,7 @@ without hiding how it works: it runs the same tools, in the same order, and prod
 
 ## Function
 
-**Milestones 1 and 2 (this version)**
+**Milestones 1 to 3 (this version)**
 
 - **New Game** copies the game template into a folder of your choosing; **Open Project** also adopts an existing
   `ZPgameTemplate` clone.
@@ -39,10 +41,18 @@ without hiding how it works: it runs the same tools, in the same order, and prod
 - **Art panel**: every image in `assets.json` with a thumbnail, its size, colours and tiles, plus budget meters for the
   console's limits (240 colours, 256 tiles per bank, 256 sprite cells) so a mistake shows before the build does.
   Drop PNGs on it to add them; it rewrites `assets.json` and keeps any options it does not know about.
+- **Tilemap editor**: select a background in the Art panel and press **Edit Tilemap**. A picture is turned into a map of
+  its own 8×8 tiles (nothing changes on screen: the ROM Studio builds afterwards is byte-identical), then every cell can
+  be repainted with tiles from the sheet. Pencil, eraser, flood fill, rectangle and picker; flip H/V; block brushes
+  picked by dragging in the tile sheet; layers; undo/redo (a mouse drag is one step); an outline of the 32×32 cells the
+  console actually shows. **New Tilemap…** starts a blank map over any tile sheet. Maps are plain [Tiled](https://www.mapeditor.org/)
+  `.tmj` files, which is exactly what `png2zp` reads, so they open in Tiled too, and anything Studio does not model
+  (object layers, properties) is kept when it saves. The editor warns about what the build would refuse (rotated tiles,
+  tiles outside any tileset) and the Art panel's colour and tile budgets count tilemaps like pictures.
 - **Settings** finds the toolchain and says exactly what is missing and how to fix it.
 - **`zpstudio-cli`**: the same pipeline with no window, for CI and headless machines.
 
-Not yet: a visual level/sprite editor, debugger views, save states, packaging. See [Roadmap](#roadmap).
+Not yet: a sprite and animation editor, debugger views, save states, packaging. See [Roadmap](#roadmap).
 
 ### How it fits together
 
@@ -127,13 +137,13 @@ A project is a folder with `src/main.c`, `assets/assets.json` and a small `zpstu
 src/core/   everything Studio knows how to do; Qt Core/Gui only, no windows
 src/app/    the window: editor, art panel, problems, settings
 src/cli/    zpstudio-cli
-tests/      unit tests per brick, plus tst_gui which drives the real window (skips without ZPdevtools)
+tests/      unit tests per brick (including the map editor against the real png2zp), plus tst_gui which drives the real window (skips without ZPdevtools)
 ```
 
 ## Roadmap
 
 1. ~~Embed the emulator in the window~~ (done in milestone 2)
-2. Visual sprite and tilemap editing on top of the layers microcode; Tiled round-trip
+2. ~~Tilemap editor~~ (done in milestone 3). Next: sprite sheets and animation frames, and placing sprites on the map
 3. Debugger panels (CPU/PPU/APU state, tile and palette viewers, the debug serial console)
 4. Packaging: AppImage / `.app` / installer, and a bundled template so `New Game` needs no extra checkout
 

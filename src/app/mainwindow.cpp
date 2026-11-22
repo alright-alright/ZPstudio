@@ -3,10 +3,12 @@
 #include "assetpanel.h"
 #include "codeeditor.h"
 #include "emulatorpane.h"
+#include "mapeditor.h"
 #include "newprojectdialog.h"
 #include "problemspanel.h"
 #include "projectcreator.h"
 #include "settingsdialog.h"
+#include "tilemap.h"
 #include "theme.h"
 
 #include <algorithm>
@@ -40,7 +42,7 @@ using namespace zps;
 
 namespace {
 const QStringList kTextSuffixes{QStringLiteral("c"), QStringLiteral("h"), QStringLiteral("asm"), QStringLiteral("json"),
-                                QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("inc")};
+                                QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("inc"), QStringLiteral("tmj")};
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), tc_(Toolchain::load())
@@ -204,6 +206,7 @@ void MainWindow::buildDocks()
     gameDock_->setWidget(game_);
     addDockWidget(Qt::RightDockWidgetArea, gameDock_);
     assets_ = new AssetPanel(this);
+    connect(assets_, &AssetPanel::openMapRequested, this, [this](const QString& path) { openFile(path); });
     auto* assetDock = new QDockWidget(tr("Art"), this);
     assetDock->setWidget(assets_);
     addDockWidget(Qt::RightDockWidgetArea, assetDock);
@@ -329,40 +332,63 @@ void MainWindow::showProject(const ProjectConfig& pr)
 
 // ---------------------------------------------------------------- editing
 
-CodeEditor* MainWindow::openFile(const QString& path)
+// The tab's document (source file or tile map), or null for a tab that is something else.
+static DocumentTab* docOf(QWidget* w) { return dynamic_cast<DocumentTab*>(w); }
+
+QWidget* MainWindow::openFile(const QString& path)
 {
     const QString abs = QFileInfo(path).absoluteFilePath();
     for (int i = 0; i < tabs_->count(); ++i) {
-        auto* e = qobject_cast<CodeEditor*>(tabs_->widget(i));
-        if (e && e->filePath() == abs) { tabs_->setCurrentIndex(i); stack_->setCurrentWidget(tabs_); return e; }
+        DocumentTab* d = docOf(tabs_->widget(i));
+        if (d && d->documentPath() == abs) { tabs_->setCurrentIndex(i); stack_->setCurrentWidget(tabs_); return tabs_->widget(i); }
     }
     if (!QFileInfo::exists(abs)) return nullptr;
-    auto* editor = new CodeEditor(abs, tabs_);
-    const int idx = tabs_->addTab(editor, QFileInfo(abs).fileName());
+
+    QWidget* tab = nullptr;
+    if (QFileInfo(abs).suffix().toLower() == QLatin1String("tmj")) {
+        TileMap map;
+        QString err;
+        if (!TileMap::load(abs, &map, &err)) {
+            QMessageBox::warning(this, tr("Cannot open the map"), err);
+            return nullptr;
+        }
+        auto* editor = new MapEditor(map, tabs_);
+        connect(editor, &MapEditor::modificationChanged, this, [this, editor](bool m) { setTabDirty(editor, m); });
+        connect(editor, &MapEditor::saved, assets_, &AssetPanel::refresh);   // a saved map changes the art budgets
+        tab = editor;
+    } else {
+        auto* editor = new CodeEditor(abs, tabs_);
+        connect(editor->document(), &QTextDocument::modificationChanged, this, [this, editor](bool m) { setTabDirty(editor, m); });
+        tab = editor;
+    }
+    const int idx = tabs_->addTab(tab, QFileInfo(abs).fileName());
     tabs_->setTabToolTip(idx, abs);
-    connect(editor->document(), &QTextDocument::modificationChanged, this, [this, editor](bool m) {
-        const int i = tabs_->indexOf(editor);
-        if (i >= 0) tabs_->setTabText(i, QFileInfo(editor->filePath()).fileName() + (m ? QStringLiteral(" •") : QString()));
-    });
     tabs_->setCurrentIndex(idx);
     stack_->setCurrentWidget(tabs_);
-    return editor;
+    return tab;
+}
+
+void MainWindow::setTabDirty(QWidget* tab, bool dirty)
+{
+    const int i = tabs_->indexOf(tab);
+    DocumentTab* d = docOf(tab);
+    if (i >= 0 && d) tabs_->setTabText(i, QFileInfo(d->documentPath()).fileName() + (dirty ? QStringLiteral(" •") : QString()));
 }
 
 void MainWindow::openFileAt(const QString& file, int line)
 {
     const QString abs = QDir::isAbsolutePath(file) || !project_ ? file : QDir(project_->dir).filePath(file);
-    if (CodeEditor* e = openFile(abs)) e->goToLine(line);
+    if (auto* e = qobject_cast<CodeEditor*>(openFile(abs))) e->goToLine(line);
 }
 
 bool MainWindow::saveAll()
 {
     bool ok = true;
     for (int i = 0; i < tabs_->count(); ++i) {
-        auto* e = qobject_cast<CodeEditor*>(tabs_->widget(i));
-        if (!e || !e->document()->isModified()) continue;
+        DocumentTab* d = docOf(tabs_->widget(i));
+        if (!d || !d->documentModified()) continue;
         QString err;
-        if (!e->save(&err)) {
+        if (!d->saveDocument(&err)) {
             QMessageBox::critical(this, tr("Could not save"), err);
             ok = false;
         }
@@ -373,7 +399,7 @@ bool MainWindow::saveAll()
 bool MainWindow::hasUnsaved() const
 {
     for (int i = 0; i < tabs_->count(); ++i)
-        if (auto* e = qobject_cast<CodeEditor*>(tabs_->widget(i)); e && e->document()->isModified()) return true;
+        if (DocumentTab* d = docOf(tabs_->widget(i)); d && d->documentModified()) return true;
     return false;
 }
 
@@ -400,21 +426,22 @@ void MainWindow::closeAllTabs()
 
 bool MainWindow::closeTab(int index)
 {
-    auto* e = qobject_cast<CodeEditor*>(tabs_->widget(index));
-    if (!e) return true;
-    if (e->document()->isModified()) {
+    QWidget* tab = tabs_->widget(index);
+    DocumentTab* d = docOf(tab);
+    if (!d) return true;
+    if (d->documentModified()) {
         const auto answer = QMessageBox::question(this, tr("Unsaved changes"),
-            tr("Save changes to %1?").arg(QFileInfo(e->filePath()).fileName()),
+            tr("Save changes to %1?").arg(QFileInfo(d->documentPath()).fileName()),
             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
         if (answer == QMessageBox::Cancel) return false;
         QString err;
-        if (answer == QMessageBox::Save && !e->save(&err)) {
+        if (answer == QMessageBox::Save && !d->saveDocument(&err)) {
             QMessageBox::critical(this, tr("Could not save"), err);
             return false;
         }
     }
     tabs_->removeTab(index);
-    e->deleteLater();
+    tab->deleteLater();
     if (!tabs_->count()) stack_->setCurrentWidget(welcome_);   // nothing open: back to the start page
     return true;
 }

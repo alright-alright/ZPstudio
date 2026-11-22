@@ -1,6 +1,8 @@
 #include "assetpanel.h"
 
 #include "assetanalysis.h"
+#include "newmapdialog.h"
+#include "tilemap.h"
 #include "theme.h"
 
 #include <QCheckBox>
@@ -75,12 +77,20 @@ AssetPanel::AssetPanel(QWidget* parent) : QWidget(parent)
     auto* add = new QPushButton(tr("Add Image…"), buttons_);
     add->setObjectName(QStringLiteral("primary"));
     auto* remove = new QPushButton(tr("Remove"), buttons_);
+    auto* edit = new QPushButton(tr("Edit Tilemap"), buttons_);
+    edit->setToolTip(tr("Select a background, then edit it as a map of tiles (a picture is converted first)"));
+    auto* newMap = new QPushButton(tr("New Tilemap…"), buttons_);
     row->addWidget(add);
     row->addWidget(remove);
+    row->addWidget(edit);
+    row->addWidget(newMap);
     row->addStretch(1);
     root->addWidget(buttons_);
     connect(add, &QPushButton::clicked, this, &AssetPanel::chooseAndAdd);
     connect(remove, &QPushButton::clicked, this, &AssetPanel::removeSelected);
+    connect(edit, &QPushButton::clicked, this, &AssetPanel::editSelectedAsTilemap);
+    connect(newMap, &QPushButton::clicked, this, &AssetPanel::newTilemap);
+    connect(list_, &QListWidget::itemDoubleClicked, this, [this] { editSelectedAsTilemap(); });
 
     setProject(std::nullopt);
 }
@@ -282,4 +292,86 @@ void AssetPanel::dropEvent(QDropEvent* e)
             files << u.toLocalFile();
     e->acceptProposedAction();
     addImages(files);
+}
+
+// ---------------------------------------------------------------- tilemaps
+
+namespace {
+// <dir>/<base>.tmj, or <base>_2.tmj... if that exists.
+QString freeMapPath(const QDir& dir, const QString& base)
+{
+    QString name = base + QStringLiteral(".tmj");
+    for (int n = 2; QFileInfo::exists(dir.filePath(name)); ++n) name = QStringLiteral("%1_%2.tmj").arg(base).arg(n);
+    return name;
+}
+} // namespace
+
+void AssetPanel::editSelectedAsTilemap()
+{
+    const int row = list_->currentRow();
+    if (!manifestOk_ || row < 0 || row >= shown_.size()) {
+        QMessageBox::information(this, tr("Edit as a tilemap"), tr("Select Background 0 or Background 1 in the list first."));
+        return;
+    }
+    const AssetEntry e = shown_[row];
+    if (e.role != AssetEntry::Role::Background0 && e.role != AssetEntry::Role::Background1) {
+        QMessageBox::information(this, tr("Edit as a tilemap"),
+                                 tr("Only the two scrolling backgrounds are tilemaps. Select Background 0 or Background 1."));
+        return;
+    }
+    const QDir base(manifest_.dir());
+    if (!e.tiled.isEmpty()) { emit openMapRequested(base.filePath(e.tiled)); return; }
+    if (e.image.isEmpty()) return;
+
+    const auto answer = QMessageBox::question(this, tr("Edit %1 as a tilemap?").arg(e.label()),
+        tr("%1 becomes a map of its 8×8 tiles, so any square of it can be repainted with tiles from the same picture.\n\n"
+           "Nothing changes on screen, and %1 is kept. The map is saved next to it as a .tmj file (Tiled can open it too).")
+            .arg(e.image));
+    if (answer != QMessageBox::Yes) return;
+
+    const QImage img(base.filePath(e.image));
+    if (img.isNull()) {
+        QMessageBox::critical(this, tr("Cannot read the picture"), e.image);
+        return;
+    }
+    const QDir imageDir = QFileInfo(base.filePath(e.image)).absoluteDir();
+    const QString tmjName = freeMapPath(imageDir, QFileInfo(e.image).completeBaseName());
+    QString err;
+    TileMap map = TileMap::createFromImage(imageDir.filePath(tmjName), QFileInfo(e.image).fileName(), img.size(),
+                                           QStringLiteral("background"), &err);
+    if (map.layers().isEmpty()) {
+        QMessageBox::critical(this, tr("Cannot make a tilemap"), err);
+        return;
+    }
+    if (!map.save(&err)) {
+        QMessageBox::critical(this, tr("Cannot save the map"), err);
+        return;
+    }
+    manifest_.setTiledBackground(e.role, base.relativeFilePath(imageDir.filePath(tmjName)), QStringLiteral("background"));
+    if (saveManifest()) refresh();
+    emit openMapRequested(imageDir.filePath(tmjName));
+}
+
+void AssetPanel::newTilemap()
+{
+    if (!manifestOk_) return;
+    NewMapDialog dlg(manifest_.dir(), this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    const NewMapDialog::Result r = dlg.result();
+    if (!confirmReplace(r.slot)) return;
+
+    const QString sheetRel = copyIntoAssets(r.tilesetFile);
+    if (sheetRel.isEmpty()) return;
+    const QDir base(manifest_.dir());
+    const QImage sheet(base.filePath(sheetRel));
+    const QString tmjName = freeMapPath(base, r.name);
+    TileMap map = TileMap::createEmpty(base.filePath(tmjName), sheetRel, sheet.size(), r.width, r.height, r.layer);
+    QString err;
+    if (!map.save(&err)) {
+        QMessageBox::critical(this, tr("Cannot save the map"), err);
+        return;
+    }
+    manifest_.setTiledBackground(r.slot, tmjName, r.layer);
+    if (saveManifest()) refresh();
+    emit openMapRequested(base.filePath(tmjName));
 }
