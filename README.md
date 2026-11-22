@@ -137,4 +137,10 @@ tests/      unit tests per brick, plus tst_gui which drives the real window (ski
 3. Debugger panels (CPU/PPU/APU state, tile and palette viewers, the debug serial console)
 4. Packaging: AppImage / `.app` / installer, and a bundled template so `New Game` needs no extra checkout
 
+## License
+
+[GNU AGPL-3.0](LICENSE), the same as [ZeroPoint](https://github.com/Pomsky2011/ZeroPoint): Studio builds the emulator's
+code into itself, so it has to be offered under the same terms. The ZeroPoint toolchain Studio drives
+([ZPdevtools](https://github.com/Pomsky2011/ZPdevtools)) is MPL-2.0 and is run as separate programs, not linked in.
+
 Built with [Claude Code](https://claude.com/claude-code).
