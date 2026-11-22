@@ -77,10 +77,10 @@ QStringList Toolchain::buildProblems() const
     return p;
 }
 
-QStringList Toolchain::runProblems() const
+QStringList Toolchain::runProblems(bool needEmulatorBinary) const
 {
     QStringList p;
-    if (emulator.isEmpty() || !QFileInfo::exists(emulator))
+    if (needEmulatorBinary && (emulator.isEmpty() || !QFileInfo::exists(emulator)))
         p << QStringLiteral("The emulator (zeropoint_sdl) was not found. Set it in Settings.");
     if (!bootRom.isEmpty() && !QFileInfo::exists(bootRom))
         p << QStringLiteral("The Boot ROM file does not exist: %1").arg(bootRom);

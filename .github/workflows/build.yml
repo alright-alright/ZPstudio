@@ -1,5 +1,7 @@
-# Builds Studio and runs its tests on Linux and macOS. tst_gui skips itself here (no ZPdevtools checkout);
-# everything else runs. Windows is not covered yet.
+# Builds Studio and runs every test on Linux and macOS, with the real toolchain and the embedded emulator:
+# the other ZeroPoint repos are checked out beside this one (the same layout as ~/Code on a dev machine), so
+# tst_gui builds a game, plays it inside the window and checks the picture, rather than skipping itself.
+# Windows is not covered yet.
 name: build
 
 on:
@@ -13,24 +15,37 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      SDL_AUDIODRIVER: dummy          # no sound card on a CI runner
     steps:
       - uses: actions/checkout@v4
+        with: { path: ZPstudio }
+      - uses: actions/checkout@v4
+        with: { repository: Pomsky2011/ZeroPoint, path: ZeroPoint }
+      - uses: actions/checkout@v4
+        with: { repository: Pomsky2011/ZPdevtools, path: ZPdevtools }
+      - uses: actions/checkout@v4
+        with: { repository: Pomsky2011/ZPgameTemplate, path: ZPgameTemplate }
 
-      - name: Install Qt 6 (Linux)
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev libgl1-mesa-dev cmake build-essential python3-pil
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev libgl1-mesa-dev cmake build-essential libsdl2-dev flex bison python3-pil
 
-      - name: Install Qt 6 (macOS)
+      - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install qt cmake pillow
+        run: brew install qt cmake sdl2 pillow
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ runner.os == 'macOS' && '-DCMAKE_PREFIX_PATH=$(brew --prefix qt)' || '' }}
+      - name: Build the ZeroPoint toolchain
+        run: |
+          make -C ZPdevtools -j4
+          make -C ZPdevtools/c_compiler -j4
 
-      - name: Build
+      - name: Configure Studio
+        run: cmake -S ZPstudio -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt 2>/dev/null || true)"
+
+      - name: Build Studio
         run: cmake --build build -j 4
 
       - name: Test
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure

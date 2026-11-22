@@ -2,6 +2,7 @@
 
 #include "assetpanel.h"
 #include "codeeditor.h"
+#include "emulatorpane.h"
 #include "newprojectdialog.h"
 #include "problemspanel.h"
 #include "projectcreator.h"
@@ -98,7 +99,10 @@ void MainWindow::buildMenusAndToolbar()
     actBuild_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
     actRun_ = new QAction(tr("▶ Run"), this);
     actRun_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
-    actRun_->setToolTip(tr("Build, then play the game in the emulator (Ctrl+R)"));
+    actRun_->setToolTip(tr("Build, then play the game in the Game panel (Ctrl+R)"));
+    actRunWindow_ = new QAction(tr("Run in Separate Window"), this);
+    actRunWindow_->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+    actRunWindow_->setToolTip(tr("Build, then play in the standalone emulator window (needs the emulator set in Settings)"));
     actStop_ = new QAction(tr("■ Stop"), this);
     actStop_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Period));
     actSettings_ = new QAction(tr("Settings…"), this);
@@ -110,7 +114,7 @@ void MainWindow::buildMenusAndToolbar()
     QAction* quit = file->addAction(tr("Quit"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
     QMenu* buildMenu = menuBar()->addMenu(tr("&Build"));
-    buildMenu->addActions({actBuild_, actRun_, actStop_});
+    buildMenu->addActions({actBuild_, actRun_, actRunWindow_, actStop_});
     menuBar()->addMenu(tr("&Tools"))->addAction(actSettings_);
 
     QToolBar* tb = addToolBar(tr("Main"));
@@ -125,8 +129,9 @@ void MainWindow::buildMenusAndToolbar()
     connect(actNew_, &QAction::triggered, this, &MainWindow::newProject);
     connect(actOpen_, &QAction::triggered, this, &MainWindow::chooseProject);
     connect(actSave_, &QAction::triggered, this, [this] { saveAll(); });
-    connect(actBuild_, &QAction::triggered, this, [this] { build(false); });
-    connect(actRun_, &QAction::triggered, this, [this] { build(true); });
+    connect(actBuild_, &QAction::triggered, this, [this] { build(RunMode::None); });
+    connect(actRun_, &QAction::triggered, this, [this] { build(RunMode::InWindow); });
+    connect(actRunWindow_, &QAction::triggered, this, [this] { build(RunMode::SeparateWindow); });
     connect(actStop_, &QAction::triggered, this, &MainWindow::stop);
     connect(actSettings_, &QAction::triggered, this, [this] { showSettings(); });
 }
@@ -193,12 +198,19 @@ void MainWindow::buildDocks()
     filesDock->setWidget(files_);
     addDockWidget(Qt::LeftDockWidgetArea, filesDock);
 
-    // Art (right)
+    // Game (right, on top) and Art (right, below it). The right column runs the full height of the window.
+    game_ = new EmulatorPane(this);
+    gameDock_ = new QDockWidget(tr("Game"), this);
+    gameDock_->setWidget(game_);
+    addDockWidget(Qt::RightDockWidgetArea, gameDock_);
     assets_ = new AssetPanel(this);
     auto* assetDock = new QDockWidget(tr("Art"), this);
     assetDock->setWidget(assets_);
     addDockWidget(Qt::RightDockWidgetArea, assetDock);
-    resizeDocks({assetDock}, {430}, Qt::Horizontal);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    resizeDocks({gameDock_, assetDock}, {400, 330}, Qt::Vertical);
+    resizeDocks({gameDock_}, {430}, Qt::Horizontal);
+    connect(game_, &EmulatorPane::stateChanged, this, &MainWindow::updateActions);
 
     // Problems / Output (bottom)
     problems_ = new ProblemsPanel(this);
@@ -300,6 +312,7 @@ void MainWindow::showProject(const ProjectConfig& pr)
     closeAllTabs();                // already saved or deliberately discarded: do not ask again per tab
     runner_.cancel();
     emulator_.stop();
+    game_->stopGame();
 
     project_ = pr;
     rememberProject(pr.dir);
@@ -408,16 +421,20 @@ bool MainWindow::closeTab(int index)
 
 // ---------------------------------------------------------------- build and run
 
-void MainWindow::build(bool thenRun)
+void MainWindow::build(RunMode then)
 {
     if (!project_ || runner_.running()) return;
+    // Without the emulator built in there is nowhere to play but the external window.
+    if (then == RunMode::InWindow && !EmulatorPane::available()) then = RunMode::SeparateWindow;
+
     const QStringList problems = tc_.buildProblems();
     if (!problems.isEmpty()) {
         showSettings(tr("Studio cannot build yet:\n\n%1").arg(problems.join(QLatin1Char('\n'))));
         return;
     }
-    if (thenRun) {
-        const QStringList runProblems = tc_.runProblems();
+    if (then != RunMode::None) {
+        // The emulator binary is only needed for the external window; the built-in one needs just the optional ROM files.
+        const QStringList runProblems = tc_.runProblems(then == RunMode::SeparateWindow);
         if (!runProblems.isEmpty()) {
             showSettings(tr("Studio cannot run the game yet:\n\n%1").arg(runProblems.join(QLatin1Char('\n'))));
             return;
@@ -428,7 +445,7 @@ void MainWindow::build(bool thenRun)
     problems_->clearAll();
     output_->clear();
     bottom_->setCurrentIndex(1);   // watch the build; switches to Problems if it fails
-    runAfterBuild_ = thenRun;
+    runAfterBuild_ = then;
     progress_->setVisible(true);
     runner_.start(BuildPlan::make(tc_, *project_), *project_);
     updateActions();
@@ -448,28 +465,41 @@ void MainWindow::onBuildFinished(const BuildResult& r)
         bottom_->setCurrentIndex(0);
         log(tr("Build failed at “%1”.").arg(r.failedStep), true);
     }
-    const bool run = runAfterBuild_ && r.ok;
-    runAfterBuild_ = false;
+    const RunMode mode = r.ok ? runAfterBuild_ : RunMode::None;
+    runAfterBuild_ = RunMode::None;
     updateActions();
-    if (run) runEmulator(r.romPath);
+    if (mode != RunMode::None) runEmulator(r.romPath, mode);
 }
 
-void MainWindow::runEmulator(const QString& rom)
+void MainWindow::runEmulator(const QString& rom, RunMode mode)
 {
     QString err;
-    if (!emulator_.start(tc_, rom, 3, &err)) {
-        QMessageBox::critical(this, tr("Could not start the emulator"), err);
-        return;
+    if (mode == RunMode::InWindow) {
+        game_->stopGame();                       // a fresh machine for the fresh build
+        if (!game_->play(tc_, rom, &err)) {
+            QMessageBox::critical(this, tr("Could not start the game"), err);
+            return;
+        }
+        gameDock_->show();
+        gameDock_->raise();
+        status_->setText(tr("Playing %1 — the keyboard goes to the game while it is focused").arg(QFileInfo(rom).fileName()));
+    } else {
+        game_->stopGame();
+        if (!emulator_.start(tc_, rom, 3, &err)) {
+            QMessageBox::critical(this, tr("Could not start the emulator"), err);
+            return;
+        }
+        status_->setText(tr("Running %1 in the emulator window (close it or press Stop)").arg(QFileInfo(rom).fileName()));
     }
-    status_->setText(tr("Running %1 (close the emulator window or press Stop)").arg(QFileInfo(rom).fileName()));
     updateActions();
 }
 
 void MainWindow::stop()
 {
     if (runner_.running()) runner_.cancel();
-    if (emulator_.running()) {
+    if (emulator_.running() || game_->running()) {
         emulator_.stop();
+        game_->stopGame();
         status_->setText(tr("Stopped"));
     }
     updateActions();
@@ -491,10 +521,11 @@ void MainWindow::updateActions()
 {
     const bool have = project_.has_value();
     const bool building = runner_.running();
-    const bool running = emulator_.running();
+    const bool running = emulator_.running() || game_->running();
     actSave_->setEnabled(have);
     actBuild_->setEnabled(have && !building);
     actRun_->setEnabled(have && !building);
+    actRunWindow_->setEnabled(have && !building);
     actStop_->setEnabled(building || running);
 }
 
@@ -510,5 +541,6 @@ void MainWindow::closeEvent(QCloseEvent* e)
     if (!saveAllOrAsk()) { e->ignore(); return; }
     runner_.cancel();
     emulator_.stop();
+    game_->stopGame();             // joins the emulation thread before the widgets go away
     e->accept();
 }

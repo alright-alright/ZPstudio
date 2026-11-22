@@ -4,7 +4,7 @@
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599c?logo=cplusplus&logoColor=white)
 ![CMake](https://img.shields.io/badge/CMake-3.16%2B-064f8c?logo=cmake&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-8b5cf6)
-![Status](https://img.shields.io/badge/status-milestone%201-e0579b)
+![Status](https://img.shields.io/badge/status-milestone%202-e0579b)
 
 ![ZeroPoint Studio](docs/screenshot.png)
 
@@ -23,12 +23,16 @@ without hiding how it works: it runs the same tools, in the same order, and prod
 
 ## Function
 
-**Milestone 1 (this version)**
+**Milestones 1 and 2 (this version)**
 
 - **New Game** copies the game template into a folder of your choosing; **Open Project** also adopts an existing
   `ZPgameTemplate` clone.
 - **Build** runs the whole pipeline (PPU microcode, art conversion, C compile, assemble, link, sign) without `make`
-  or `sh`, and **Run** builds then plays the game in the emulator on the real Boot ROM.
+  or `sh`.
+- **Run** builds, then plays the game **inside the window**, in the Game panel: the emulator is built into Studio, with
+  the real Boot ROM and APU BIOS when Settings names them. Restart, power-cycle, mute and volume sit under the picture,
+  with the speed (60 fps = real time) and a plain note of whether the keyboard is going to the game or the editor.
+  *Run in Separate Window* opens the standalone `zeropoint_sdl` instead.
 - **Problems panel**: compiler and tool errors become a list; double-click one to jump to the line in the editor.
   (`def88186cc` numbers parse errors by its preprocessed copy of the file; Studio maps them back to your source, and
   leaves the location off rather than guess when it cannot.)
@@ -38,8 +42,7 @@ without hiding how it works: it runs the same tools, in the same order, and prod
 - **Settings** finds the toolchain and says exactly what is missing and how to fix it.
 - **`zpstudio-cli`**: the same pipeline with no window, for CI and headless machines.
 
-Not yet: a visual level/sprite editor, debugger views, an embedded emulator (it opens in its own window), save states,
-packaging. See [Roadmap](#roadmap).
+Not yet: a visual level/sprite editor, debugger views, save states, packaging. See [Roadmap](#roadmap).
 
 ### How it fits together
 
@@ -61,7 +64,7 @@ flowchart LR
     end
     Runner -->|runs| Tools["ZPdevtools<br/>png2zp · zpcc/def88186cc · cpuasm · zplink · zpbuild"]
     Tools --> ROM[("game.zpb")]
-    GUI -->|launches| Emu["zeropoint_sdl<br/>+ Boot ROM"]
+    GUI -->|plays in| Emu["embedded emulator<br/>(ZeroPoint core + widget)"]
     ROM --> Emu
     Assets <-->|edits| JSON[["assets.json + PNGs"]]
 ```
@@ -94,8 +97,13 @@ To *use* it you also need the ZeroPoint tools. Clone these next to this repo (St
 ~/Code/ZPstudio        this repo
 ~/Code/ZPdevtools      build it: `make`, then `make` in c_compiler/ (and llvm_compiler/ for zpcc)
 ~/Code/ZPgameTemplate  the starter game
-~/Code/ZeroPoint       the emulator (zeropoint_sdl)
+~/Code/ZeroPoint       the emulator: Studio compiles its core and Qt widget into itself
 ```
+
+The emulator needs SDL2 (for audio) at build time: `brew install sdl2` / `sudo apt install libsdl2-dev`. CMake prints
+`Emulator embedded from ...` when it found everything; otherwise it says why not (`-DZPSTUDIO_EMULATOR_DIR=...` points it
+at a checkout elsewhere, `-DZPSTUDIO_EMBED_EMULATOR=OFF` skips it) and Run falls back to an external `zeropoint_sdl`.
+Studio defaults to a Release build because an unoptimised emulator cannot keep up with real time.
 
 and Python 3 with Pillow (`pip install pillow`) for the art converter. Retail Boot ROM and APU BIOS binaries are on the
 [ZPdevtools release](https://github.com/Pomsky2011/ZPdevtools/releases); point Studio at them in **Tools → Settings**.
@@ -124,7 +132,7 @@ tests/      unit tests per brick, plus tst_gui which drives the real window (ski
 
 ## Roadmap
 
-1. Embed the emulator in the window (link the emulator core) instead of a separate process
+1. ~~Embed the emulator in the window~~ (done in milestone 2)
 2. Visual sprite and tilemap editing on top of the layers microcode; Tiled round-trip
 3. Debugger panels (CPU/PPU/APU state, tile and palette viewers, the debug serial console)
 4. Packaging: AppImage / `.app` / installer, and a bundled template so `New Game` needs no extra checkout

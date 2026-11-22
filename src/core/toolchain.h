@@ -30,8 +30,9 @@ struct Toolchain {
 
     // Human-readable problems that stop a *build* (empty = ready to build).
     QStringList buildProblems() const;
-    // Extra problems that only stop Run (no emulator).
-    QStringList runProblems() const;
+    // Extra problems that only stop Run. The emulator binary is only needed for the external window: when the
+    // emulator is built into Studio, pass needEmulatorBinary=false (the Boot ROM / APU BIOS files still matter).
+    QStringList runProblems(bool needEmulatorBinary = true) const;
 
     // ---- discovery -----------------------------------------------------
     // Best guesses from a few well-known places next to the Studio checkout / in PATH.

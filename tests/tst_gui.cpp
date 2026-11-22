@@ -4,6 +4,7 @@
 
 #include "assetpanel.h"
 #include "codeeditor.h"
+#include "emulatorpane.h"
 #include "mainwindow.h"
 #include "problemspanel.h"
 #include "projectcreator.h"
@@ -141,6 +142,58 @@ private slots:
         QVERIFY(modalSeen_.isEmpty());
     }
 
+    void runsTheGameInsideTheWindow()
+    {
+        if (!EmulatorPane::available()) QSKIP("built without the embedded emulator");
+        CreateOptions o;
+        o.templateDir = tc_.templateDir;
+        o.targetDir = workDir_.path() + "/play";
+        ProjectConfig pr;
+        QString err;
+        QVERIFY2(createProject(o, &pr, &err), qPrintable(err));
+
+        MainWindow w;
+        w.show();
+        QVERIFY(w.openProject(pr.dir));
+        auto* pane = w.findChild<EmulatorPane*>();
+        QVERIFY(pane && pane->screen());
+        QVERIFY(!pane->running());
+
+        QAction* run = action(w, "▶ Run");
+        QAction* stop = action(w, "■ Stop");
+        QVERIFY(run && stop && !stop->isEnabled());
+        run->trigger();                                            // build, then load it into the pane
+        QTRY_VERIFY_WITH_TIMEOUT(pane->running(), 60000);
+        QVERIFY(stop->isEnabled());
+        QVERIFY2(modalSeen_.isEmpty(), qPrintable("unexpected dialog: " + modalSeen_));
+
+        // The picture must actually appear: a template game paints sky, ground and sprites, so the frame holds many
+        // colours (a black or frozen screen has one).
+        auto colours = [&] {
+            QSet<QRgb> seen;
+            const QImage img = pane->screen()->grab().toImage();
+            for (int y = 0; y < img.height(); y += 3)
+                for (int x = 0; x < img.width(); x += 3) seen.insert(img.pixel(x, y));
+            return seen.size();
+        };
+        QTRY_VERIFY2_WITH_TIMEOUT(colours() >= 6, qPrintable(QString("only %1 colours on screen").arg(colours())), 30000);
+
+        // The picture moves: the template scrolls its backgrounds, so two frames a moment apart differ.
+        const QImage a = pane->screen()->grab().toImage();
+        QTest::qWait(500);
+        QVERIFY2(pane->screen()->grab().toImage() != a, "the frame never changed: the game is not running");
+
+        stop->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!pane->running(), 10000);
+        QVERIFY(!stop->isEnabled());
+
+        // Run again on the same window: a new machine each time, and no leftovers.
+        run->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(pane->running(), 60000);
+        stop->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!pane->running(), 10000);
+    }
+
     // Not a check: with ZPSTUDIO_SCREENSHOT=/path/out.png it saves what the window looks like (for the README).
     void screenshotForDocs()
     {
@@ -159,10 +212,12 @@ private slots:
         w.resize(1280, 800);
         w.show();
         QVERIFY(w.openProject(pr.dir));
-        action(w, "Build")->trigger();
-        QTRY_VERIFY_WITH_TIMEOUT(action(w, "Build")->isEnabled(), 60000);
-        QTest::qWait(300);
+        action(w, "▶ Run")->trigger();                      // builds, then plays inside the Game panel
+        auto* pane = w.findChild<EmulatorPane*>();
+        QTRY_VERIFY_WITH_TIMEOUT(pane->running() || !EmulatorPane::available(), 60000);
+        QTest::qWait(2500);                                  // let the game get going
         QVERIFY(w.grab().save(out));
+        action(w, "■ Stop")->trigger();
     }
 
     void cancelledBuildLeavesTheWindowUsable()

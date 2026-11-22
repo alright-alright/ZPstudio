@@ -1,5 +1,6 @@
 #include "settingsdialog.h"
 
+#include "emulatorpane.h"
 #include "theme.h"
 
 #include <QComboBox>
@@ -28,7 +29,8 @@ SettingsDialog::SettingsDialog(const Toolchain& t, QWidget* parent) : QDialog(pa
     compiler_->addItems({tr("Automatic (zpcc if built, else def88186cc)"), tr("zpcc (clang)"), tr("def88186cc (portable C89)")});
     compiler_->setCurrentIndex(int(t.compilerPref));
     form->addRow(tr("C compiler"), compiler_);
-    emulator_ = addRow(form, tr("Emulator (zeropoint_sdl)"), t.emulator, false);
+    emulator_ = addRow(form, EmulatorPane::available() ? tr("Separate emulator window (optional)") : tr("Emulator (zeropoint_sdl)"),
+                       t.emulator, false);
     bootRom_  = addRow(form, tr("Boot ROM (optional)"), t.bootRom, false, tr("Boot ROM (*.bin);;All files (*)"));
     apuBios_  = addRow(form, tr("APU BIOS (optional)"), t.apuBios, false, tr("APU BIOS (*.bin);;All files (*)"));
     template_ = addRow(form, tr("Game template folder"), t.templateDir, true);
@@ -97,7 +99,8 @@ void SettingsDialog::validate()
 {
     const Toolchain t = toolchain();
     const QStringList build = t.buildProblems();
-    const QStringList run = t.runProblems();
+    // With the emulator built in, the zeropoint_sdl binary is only for "Run in Separate Window".
+    const QStringList run = t.runProblems(!EmulatorPane::available());
     QStringList lines;
     for (const QString& p : build) lines << QStringLiteral("✗ ") + p;
     for (const QString& p : run) lines << QStringLiteral("✗ ") + p;

@@ -10,7 +10,9 @@
 
 class AssetPanel;
 class CodeEditor;
+class EmulatorPane;
 class ProblemsPanel;
+class QDockWidget;
 class QAction;
 class QFileSystemModel;
 class QLabel;
@@ -57,9 +59,10 @@ private:
     bool hasUnsaved() const;
 
     // ---- build and run ----
-    void build(bool thenRun);
+    enum class RunMode { None, InWindow, SeparateWindow };
+    void build(RunMode then);
     void onBuildFinished(const zps::BuildResult& r);
-    void runEmulator(const QString& rom);
+    void runEmulator(const QString& rom, RunMode mode);
     void stop();
     void showSettings(const QString& reason = QString());
     void updateActions();
@@ -71,7 +74,7 @@ private:
     std::optional<zps::ProjectConfig> project_;
     zps::BuildRunner runner_;
     zps::EmulatorLauncher emulator_;
-    bool runAfterBuild_ = false;
+    RunMode runAfterBuild_ = RunMode::None;
 
     QStackedWidget* stack_ = nullptr;
     QWidget* welcome_ = nullptr;
@@ -81,11 +84,13 @@ private:
     QTreeView* files_ = nullptr;
     QFileSystemModel* fileModel_ = nullptr;
     AssetPanel* assets_ = nullptr;
+    EmulatorPane* game_ = nullptr;
+    QDockWidget* gameDock_ = nullptr;
     ProblemsPanel* problems_ = nullptr;
     QPlainTextEdit* output_ = nullptr;
     QTabWidget* bottom_ = nullptr;
     QLabel* status_ = nullptr;
     QProgressBar* progress_ = nullptr;
 
-    QAction *actNew_, *actOpen_, *actSave_, *actBuild_, *actRun_, *actStop_, *actSettings_;
+    QAction *actNew_, *actOpen_, *actSave_, *actBuild_, *actRun_, *actRunWindow_, *actStop_, *actSettings_;
 };
