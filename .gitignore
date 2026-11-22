@@ -1,0 +1,7 @@
+build/
+build-*/
+*.user
+.DS_Store
+CMakeLists.txt.user
+.vscode/
+.idea/
